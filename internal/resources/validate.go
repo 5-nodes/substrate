@@ -674,3 +674,42 @@ func ValidatePrivilegedSecurityContext(fldPath *field.Path, privileged bool, add
 func AllLinuxCapabilities() []string {
 	return sets.List(linuxCapabilities)
 }
+
+// Disk volume size bounds (DiskVolumeSource.size_bytes).
+const (
+	MinDiskVolumeBytes    = int64(1) << 30 // 1 GiB
+	MaxDiskVolumeBytes    = int64(1) << 40 // 1 TiB
+	DiskVolumeSizeQuantum = int64(1) << 20 // 1 MiB
+)
+
+// ValidateDiskVolumeSize checks a disk volume's size: 1 GiB to 1 TiB, a
+// multiple of 1 MiB.
+func ValidateDiskVolumeSize(fldPath *field.Path, size int64) field.ErrorList {
+	if size < MinDiskVolumeBytes || size > MaxDiskVolumeBytes || size%DiskVolumeSizeQuantum != 0 {
+		return field.ErrorList{field.Invalid(fldPath, size, "must be at least 1 GiB, at most 1 TiB, and a multiple of 1 MiB")}
+	}
+	return nil
+}
+
+// ValidateDevicePath checks where a block device appears in a container: a
+// clean absolute path under /dev, not /dev itself and not under /dev/pts.
+func ValidateDevicePath(fldPath *field.Path, p string) field.ErrorList {
+	if p == "" {
+		return nil
+	}
+	bad := !strings.HasPrefix(p, "/dev/") || strings.HasSuffix(p, "/") ||
+		strings.Contains(p, "//") || strings.Contains(p, ":") || mountPathBadSegmentRE.MatchString(p) ||
+		p == "/dev/pts" || strings.HasPrefix(p, "/dev/pts/")
+	if !bad {
+		for _, r := range p {
+			if r < 0x20 || r == 0x7f {
+				bad = true
+				break
+			}
+		}
+	}
+	if bad {
+		return field.ErrorList{field.Invalid(fldPath, p, "must be a clean absolute path under /dev, such as /dev/data, and not under /dev/pts")}
+	}
+	return nil
+}

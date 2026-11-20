@@ -153,6 +153,7 @@ func (s *AteWorkerService) RestoreWorkload(ctx context.Context, req *ateworkerpb
 		templateAtespace: req.GetActorTemplateAtespace(),
 		templateName:     req.GetActorTemplateName(),
 		containers:       req.GetSpec().GetContainers(),
+		disks:            req.GetSpec().GetDiskVolumes(),
 		assetPaths:       req.GetRuntimeAssetPaths(),
 		egressGateway:    req.GetEgressGateway(),
 		size:             sizing.FromLimits(req.GetResources().GetLimits()),
@@ -194,6 +195,11 @@ func (s *AteWorkerService) RestoreWorkload(ctx context.Context, req *ateworkerpb
 		if err := untarDurableVolumes(durableDir, restoreDir, durableVolumeNames(p.containers)); err != nil {
 			return nil, err
 		}
+	}
+	// Disk images likewise: every fidelity carries them, and both the VM
+	// restore and the cold boot open them.
+	if err := stageDiskVolumes(p.actorDirs, restoreDir, p.disks); err != nil {
+		return nil, err
 	}
 
 	switch scope := req.GetFidelity(); scope {
@@ -285,6 +291,9 @@ func (s *AteWorkerService) restoreMemoryFidelity(ctx context.Context, p actorBoo
 	// Repoint the snapshot's per-actor paths to this actor's: its VMDir
 	// sockets and files, and the kernel and guest image atelet staged under
 	// this actor's own directory.
+	if err := rewriteSnapshotDiskPaths(restoreDir, p.actorDirs); err != nil {
+		return err
+	}
 	if err := rewriteSnapshotPaths(restoreDir, actorUID, kernel, image); err != nil {
 		return fmt.Errorf("while rewriting snapshot paths: %w", err)
 	}
@@ -582,6 +591,9 @@ func (s *AteWorkerService) cleanupFailedRestoreRootfs(ctx context.Context, actor
 	if err := os.RemoveAll(rootfsUpperDir(actorDirs)); err != nil {
 		slog.WarnContext(ctx, "Failed to remove rootfs upper dir after Restore failure", slog.String("actorUID", actorUID), slog.Any("err", err))
 	}
+	if err := removeDiskVolumes(actorDirs); err != nil {
+		slog.WarnContext(ctx, "Failed to remove disk volumes after Restore failure", slog.String("actorUID", actorUID), slog.Any("err", err))
+	}
 	if err := imagecache.UnmountAllUnder(actorDirs.GetOciBundleDir()); err != nil {
 		slog.WarnContext(ctx, "Failed to unmount bundle rootfs overlays after Restore failure", slog.String("actorUID", actorUID), slog.Any("err", err))
 	}
@@ -729,6 +741,60 @@ func rewriteSnapshotPaths(snapshotDir, id, kernel, image string) error {
 	}
 	if !changed {
 		// Same-actor resume: nothing to rewrite, so leave a preserved snapshot untouched.
+		return nil
+	}
+	out, err := json.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	// Temp file + rename, not O_TRUNC, which would write through a shared inode.
+	tmp, err := os.CreateTemp(snapshotDir, ".config.json.tmp-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name()) // no-op once the rename succeeds
+	if _, err := tmp.Write(out); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), cfgPath)
+}
+
+// rewriteSnapshotDiskPaths repoints the snapshot config.json's disk volume
+// devices at this actor's images (stageDiskVolumes put them in place): a
+// snapshot restored into another actor names the source actor's files. It
+// refuses any other disk, which this worker never configures.
+func rewriteSnapshotDiskPaths(snapshotDir string, actorDirs *ateworkerpb.ActorDirs) error {
+	cfgPath := filepath.Join(snapshotDir, "config.json")
+	b, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return err
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(b, &cfg); err != nil {
+		return fmt.Errorf("parsing %q: %w", cfgPath, err)
+	}
+	disks, _ := cfg["disks"].([]any)
+	changed := false
+	for _, d := range disks {
+		dm, ok := d.(map[string]any)
+		if !ok {
+			return fmt.Errorf("snapshot config %q has a malformed disk device", cfgPath)
+		}
+		id, _ := dm["id"].(string)
+		name, ok := strings.CutPrefix(id, diskDeviceID(""))
+		if !ok || name == "" {
+			return fmt.Errorf("snapshot config %q has disk device with unknown id %q", cfgPath, id)
+		}
+		if want := diskImagePath(actorDirs, name); dm["path"] != want {
+			dm["path"] = want
+			changed = true
+		}
+	}
+	if !changed {
 		return nil
 	}
 	out, err := json.Marshal(cfg)

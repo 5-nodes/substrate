@@ -88,6 +88,17 @@ type PmemConfig struct {
 	DiscardWrites bool `json:"discard_writes,omitempty"`
 }
 
+// DiskConfig configures a virtio-blk device backed by a file on the host. ID
+// names the device in vm.info's device tree (see DevicePCIBDF).
+type DiskConfig struct {
+	Path string `json:"path"`
+	ID   string `json:"id,omitempty"`
+	// ImageType "Raw" declares the file a raw image. Left to auto-detection,
+	// cloud-hypervisor refuses guest writes to sector 0 (so a guest cannot
+	// turn a raw image into, say, a qcow2 header), which breaks mkfs.
+	ImageType string `json:"image_type,omitempty"`
+}
+
 // RngConfig sets the entropy source (kata uses /dev/urandom).
 type RngConfig struct {
 	Src string `json:"src"`

@@ -701,6 +701,25 @@ func TestValidateActorTemplate(t *testing.T) {
 			}}
 		},
 	}, {
+		name: "disk volume attached as a device",
+		mutate: func(tmpl *ateapi.ActorTemplate) {
+			tmpl.Volumes = append(tmpl.Volumes, &ateapi.Volume{Name: "docker", Disk: &ateapi.DiskVolumeSource{SizeBytes: 32 << 30}})
+			tmpl.Containers[0].VolumeDevices = []*ateapi.VolumeDevice{{Name: "docker", DevicePath: "/dev/docker"}}
+		},
+	}, {
+		name: "disk volume size out of range",
+		mutate: func(tmpl *ateapi.ActorTemplate) {
+			tmpl.Volumes = append(tmpl.Volumes, &ateapi.Volume{Name: "docker", Disk: &ateapi.DiskVolumeSource{SizeBytes: 1 << 20}})
+		},
+		want: field.ErrorList{field.Invalid(field.NewPath("volumes").Index(0).Child("disk", "size_bytes"), nil, "")},
+	}, {
+		name: "device path outside /dev",
+		mutate: func(tmpl *ateapi.ActorTemplate) {
+			tmpl.Volumes = append(tmpl.Volumes, &ateapi.Volume{Name: "docker", Disk: &ateapi.DiskVolumeSource{SizeBytes: 1 << 30}})
+			tmpl.Containers[0].VolumeDevices = []*ateapi.VolumeDevice{{Name: "docker", DevicePath: "/var/lib/docker"}}
+		},
+		want: field.ErrorList{field.Invalid(field.NewPath("containers").Index(0).Child("volume_devices").Index(0).Child("device_path"), nil, "")},
+	}, {
 		name: "privileged container",
 		mutate: func(tmpl *ateapi.ActorTemplate) {
 			tmpl.Containers[0].SecurityContext = &ateapi.SecurityContext{Privileged: true}
@@ -1023,4 +1042,36 @@ func validActorTemplate(mutations ...func(*ateapi.ActorTemplate)) *ateapi.ActorT
 		m(template)
 	}
 	return template
+}
+
+// The disk rules span volumes and containers, so they live in the request-level
+// check.
+func TestValidateActorTemplateDiskReferences(t *testing.T) {
+	disk := &ateapi.Volume{Name: "docker", Disk: &ateapi.DiskVolumeSource{SizeBytes: 1 << 30}}
+	data := &ateapi.Volume{Name: "data", DurableDir: &ateapi.DurableDirVolumeSource{}}
+	ctr := func(c *ateapi.Container) *ateapi.Container { c.Name = "main"; return c }
+	for _, tc := range []struct {
+		name    string
+		tmpl    *ateapi.ActorTemplate
+		wantErr string
+	}{
+		{"attached once", &ateapi.ActorTemplate{Volumes: []*ateapi.Volume{disk}, Containers: []*ateapi.Container{ctr(&ateapi.Container{VolumeDevices: []*ateapi.VolumeDevice{{Name: "docker", DevicePath: "/dev/docker"}}})}}, ""},
+		{"in volume_mounts", &ateapi.ActorTemplate{Volumes: []*ateapi.Volume{disk}, Containers: []*ateapi.Container{ctr(&ateapi.Container{VolumeMounts: []*ateapi.VolumeMount{{Name: "docker", MountPath: "/var/lib/docker"}}})}}, "attach it with volume_devices"},
+		{"device names a non-disk volume", &ateapi.ActorTemplate{Volumes: []*ateapi.Volume{data}, Containers: []*ateapi.Container{ctr(&ateapi.Container{VolumeDevices: []*ateapi.VolumeDevice{{Name: "data", DevicePath: "/dev/data"}}})}}, "must reference a disk volume"},
+		{"attached twice", &ateapi.ActorTemplate{Volumes: []*ateapi.Volume{disk}, Containers: []*ateapi.Container{
+			ctr(&ateapi.Container{VolumeDevices: []*ateapi.VolumeDevice{{Name: "docker", DevicePath: "/dev/a"}}}),
+			{Name: "side", VolumeDevices: []*ateapi.VolumeDevice{{Name: "docker", DevicePath: "/dev/b"}}},
+		}}, "may be attached once"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			errs := ValidateCustom_CreateActorTemplateRequest_ActorTemplate(context.Background(), MakeCreateOp(context.Background()), field.NewPath("actor_template"), tc.tmpl, nil)
+			got := errs.ToAggregate()
+			switch {
+			case tc.wantErr == "" && got != nil:
+				t.Fatalf("unexpected errors: %v", got)
+			case tc.wantErr != "" && (got == nil || !strings.Contains(got.Error(), tc.wantErr)):
+				t.Fatalf("errors = %v, want one containing %q", got, tc.wantErr)
+			}
+		})
+	}
 }

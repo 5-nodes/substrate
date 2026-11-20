@@ -191,6 +191,8 @@ type actorContainer struct {
 	spec *specs.Spec
 	// imageMounts are the image volumes this container mounts, and where.
 	imageMounts []*ateworkerpb.VolumeMount
+	// volumeDevices are the disk volumes this container sees as block devices.
+	volumeDevices []*ateworkerpb.VolumeDevice
 }
 
 // resolvedRuntime holds the concrete binary paths for a request, taken from fetched
@@ -265,6 +267,7 @@ func (s *AteWorkerService) RunWorkload(ctx context.Context, req *ateworkerpb.Run
 		templateAtespace: req.GetActorTemplateAtespace(),
 		templateName:     req.GetActorTemplateName(),
 		containers:       req.GetSpec().GetContainers(),
+		disks:            req.GetSpec().GetDiskVolumes(),
 		assetPaths:       req.GetRuntimeAssetPaths(),
 		egressGateway:    req.GetEgressGateway(),
 		size:             sizing.FromLimits(req.GetResources().GetLimits()),
@@ -292,6 +295,10 @@ func (s *AteWorkerService) RunWorkload(ctx context.Context, req *ateworkerpb.Run
 		return nil, err
 	}
 
+	// A fresh actor starts with empty disks.
+	if err := createDiskVolumes(p.actorDirs, p.disks); err != nil {
+		return nil, err
+	}
 	if err := s.coldBootActorRetrying(ctx, p); err != nil {
 		return nil, err
 	}
@@ -310,7 +317,10 @@ type actorBootParams struct {
 	templateAtespace string
 	templateName     string
 	containers       []*ateworkerpb.Container
-	assetPaths       map[string]string
+	// disks are the actor's disk volumes; their images must be in place (see
+	// stageDiskVolumes) before the VM is created.
+	disks      []*ateworkerpb.DiskVolume
+	assetPaths map[string]string
 	// egressGateway is nil unless actor TCP should be redirected through atunnel.
 	egressGateway *ateworkerpb.EgressGateway
 	// size is the actor's declared limits (from the ActorTemplate), supplied on
@@ -589,8 +599,14 @@ func (s *AteWorkerService) coldBootActor(ctx context.Context, p actorBootParams)
 		}
 	}()
 
+	// Disk volumes, now that the kata-agent watches for their uevents.
+	diskPCI, err := attachDiskVolumes(ctx, client, p.actorDirs, p.disks)
+	if err != nil {
+		return err
+	}
+
 	// Post-boot kata-agent setup: sandbox, guest networking, start each container.
-	if err := s.startActorContainers(ctx, ac, actorUID, vsockPath, ctrs); err != nil {
+	if err := s.startActorContainers(ctx, ac, actorUID, vsockPath, ctrs, diskPCI); err != nil {
 		return err
 	}
 	tContainers := time.Now()
@@ -660,6 +676,7 @@ func (s *AteWorkerService) buildActorContainers(actorUID string, actorDirs *atew
 		if err := ocispec.ShapeMicroVM(spec, ocispec.MicroVMOptions{ActorDirs: actorDirs, ContainerName: cn, Privileged: privileged}); err != nil {
 			return nil, fmt.Errorf("while shaping the OCI spec for %q: %w", cn, err)
 		}
+		addBlockDeviceNodes(spec, c.GetVolumeDevices())
 		// Compose the bundle rootfs from the node's cached image layers (an
 		// overlay mounted in this pod's namespace; no-op for bundles without an
 		// overlay spec). Everything downstream — the /etc writes below,
@@ -675,12 +692,13 @@ func (s *AteWorkerService) buildActorContainers(actorUID string, actorDirs *atew
 			return nil, fmt.Errorf("while writing guest /etc files for %q: %w", cn, err)
 		}
 		ctrs[i] = actorContainer{
-			name:         cn,
-			id:           ocispec.GuestContainerID(cn),
-			bundle:       bundle,
-			bundleRootfs: bundleRootfs,
-			spec:         spec,
-			imageMounts:  c.GetImageVolumeMounts(),
+			name:          cn,
+			id:            ocispec.GuestContainerID(cn),
+			bundle:        bundle,
+			bundleRootfs:  bundleRootfs,
+			spec:          spec,
+			imageMounts:   c.GetImageVolumeMounts(),
+			volumeDevices: c.GetVolumeDevices(),
 		}
 	}
 	return ctrs, nil
@@ -860,7 +878,7 @@ func buildFsConfigs(id string) []ch.FsConfig {
 // does at boot: establish the sandbox once (mounting the kataShared virtio-fs base),
 // configure guest networking (eth0 IP/MAC/MTU + routes) once, then start each
 // container on its own overlay rootfs. On failure it dumps guest diagnostics.
-func (s *AteWorkerService) startActorContainers(ctx context.Context, ac *kata.AgentClient, id, vsockPath string, ctrs []actorContainer) error {
+func (s *AteWorkerService) startActorContainers(ctx context.Context, ac *kata.AgentClient, id, vsockPath string, ctrs []actorContainer, diskPCI map[string]string) error {
 	// Establish the agent sandbox + the kataShared virtio-fs mount (every
 	// container's merged rootfs, durable volumes, CSI volumes, and system-info
 	// volumes). All containers share it, so use the first container's hostname.
@@ -892,7 +910,7 @@ func (s *AteWorkerService) startActorContainers(ctx context.Context, ac *kata.Ag
 	tNetwork := time.Now()
 
 	for _, c := range ctrs {
-		if err := s.startRootfsContainer(ctx, ac, vsockPath, c); err != nil {
+		if err := s.startRootfsContainer(ctx, ac, vsockPath, c, diskPCI); err != nil {
 			return err
 		}
 	}
@@ -909,9 +927,13 @@ func (s *AteWorkerService) startActorContainers(ctx context.Context, ac *kata.Ag
 // dumps the guest's view of the shared tree.
 //
 // Its spec binds every declared volume at its mount path.
-func (s *AteWorkerService) startRootfsContainer(ctx context.Context, ac *kata.AgentClient, vsockPath string, c actorContainer) error {
+func (s *AteWorkerService) startRootfsContainer(ctx context.Context, ac *kata.AgentClient, vsockPath string, c actorContainer, diskPCI map[string]string) error {
+	devices, err := kataBlockDevices(c.volumeDevices, diskPCI)
+	if err != nil {
+		return err
+	}
 	cCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	err := ac.StartRootfsContainer(cCtx, c.id, c.spec)
+	err = ac.StartRootfsContainer(cCtx, c.id, c.spec, devices)
 	cancel()
 	if err != nil {
 		if s.guestDebug {

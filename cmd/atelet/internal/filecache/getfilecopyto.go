@@ -22,7 +22,7 @@ import (
 	"os"
 	"time"
 
-	"go.ate.dev/substrate/cmd/atelet/internal/sparsefile"
+	"go.ate.dev/substrate/internal/sparsefile"
 )
 
 // GetFileCopyTo materializes the artifact identified by key at dst as a

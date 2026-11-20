@@ -452,7 +452,7 @@ func (a *AgentClient) CreateSandboxForActor(ctx context.Context, opts CreateSand
 // the stock kata flow: the agent's setup_bundle binds shared/<cid>/rootfs to
 // /run/kata-containers/<cid>/rootfs and the container runs there. Writable: the
 // host-side overlay upper receives the writes (the guest mounts no overlay itself).
-func (a *AgentClient) StartRootfsContainer(ctx context.Context, cid string, spec *specs.Spec) error {
+func (a *AgentClient) StartRootfsContainer(ctx context.Context, cid string, spec *specs.Spec, devices []*agentpb.Device) error {
 	pbSpec := SpecToAgentPB(spec)
 	pbSpec.Root = &agentpb.Root{Path: GuestSharedRootfs(cid), Readonly: false}
 	// Per-container cgroup under the shared /actor parent, so the guest
@@ -464,6 +464,7 @@ func (a *AgentClient) StartRootfsContainer(ctx context.Context, cid string, spec
 		ContainerId: cid,
 		ExecId:      cid,
 		OCI:         pbSpec,
+		Devices:     devices,
 	}); err != nil {
 		return fmt.Errorf("creating rootfs container %q: %w", cid, err)
 	}

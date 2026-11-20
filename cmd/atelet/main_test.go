@@ -1737,3 +1737,40 @@ func TestWorkerCallError(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildWorkerWorkloadSpecForwardsDiskVolumes(t *testing.T) {
+	in := &ateletpb.WorkloadSpec{
+		Volumes: []*ateletpb.Volume{
+			{Name: "docker", Disk: &ateletpb.DiskVolumeSource{SizeBytes: 32 << 30}},
+			{Name: "data", DurableDir: &ateletpb.DurableDirVolumeSource{}},
+		},
+		Containers: []*ateletpb.Container{{
+			Name:          "main",
+			VolumeDevices: []*ateletpb.VolumeDevice{{Name: "docker", DevicePath: "/dev/docker"}},
+		}},
+	}
+	want := &ateworkerpb.WorkloadSpec{
+		DiskVolumes: []*ateworkerpb.DiskVolume{{Name: "docker", SizeBytes: 32 << 30}},
+		Containers: []*ateworkerpb.Container{{
+			Name:          "main",
+			VolumeDevices: []*ateworkerpb.VolumeDevice{{Name: "docker", DevicePath: "/dev/docker"}},
+		}},
+	}
+	got, err := buildWorkerWorkloadSpec(in, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff := cmp.Diff(want, got, protocmp.Transform()); diff != "" {
+		t.Errorf("buildWorkerWorkloadSpec() mismatch (-want +got):\n%s", diff)
+	}
+
+	in.Containers[0].VolumeMounts = []*ateletpb.VolumeMount{{Name: "docker", MountPath: "/var/lib/docker"}}
+	if _, err := buildWorkerWorkloadSpec(in, nil); err == nil {
+		t.Error("accepted a disk volume in volume_mounts")
+	}
+	in.Containers[0].VolumeMounts = nil
+	in.Containers[0].VolumeDevices = []*ateletpb.VolumeDevice{{Name: "data", DevicePath: "/dev/data"}}
+	if _, err := buildWorkerWorkloadSpec(in, nil); err == nil {
+		t.Error("attached a non-disk volume as a device")
+	}
+}

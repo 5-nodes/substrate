@@ -134,13 +134,15 @@ func (s *AteWorkerService) CheckpointWorkload(ctx context.Context, req *ateworke
 	// container has a rootfs upper.
 	durable := hasDurableVolumes(req.GetSpec().GetContainers())
 	csi := hasCsiVolumes(req.GetSpec().GetContainers())
+	// Disk volumes are captured like durable-dir volumes, under every fidelity.
+	disks := req.GetSpec().GetDiskVolumes()
 	switch scope {
 	case ateworkerpb.SnapshotFidelity_SNAPSHOT_FIDELITY_MEMORY, ateworkerpb.SnapshotFidelity_SNAPSHOT_FIDELITY_ROOTFS:
 	case ateworkerpb.SnapshotFidelity_SNAPSHOT_FIDELITY_VOLUMES:
 		// TODO: Revisit handling for CSI volumes since snapshots are currently quietly ignored.
-		if !durable && !csi {
+		if !durable && !csi && len(disks) == 0 {
 			return nil, apierror.FailedPrecondition(
-				"no durable-dir or CSI volumes found for a VOLUMES snapshot")
+				"no durable-dir, disk or CSI volumes found for a VOLUMES snapshot")
 		}
 	default:
 		return nil, apierror.InvalidArgument("unsupported snapshot fidelity: %v", scope)
@@ -228,6 +230,14 @@ func (s *AteWorkerService) CheckpointWorkload(ctx context.Context, req *ateworke
 			return err
 		})
 	}
+	var diskFiles []string
+	if len(disks) > 0 {
+		g.Go(func() error {
+			var err error
+			diskFiles, err = checkpointDiskVolumes(gctx, actorDirs, checkpointDir, disks)
+			return err
+		})
+	}
 	if shipsRootfs {
 		g.Go(func() error {
 			t := time.Now()
@@ -272,7 +282,7 @@ func (s *AteWorkerService) CheckpointWorkload(ctx context.Context, req *ateworke
 		slog.Duration("durable_dir", dDurable), slog.Duration("rootfs_upper", dUpper),
 		slog.Duration("teardown", dTeardown))
 	s.recordFinalIfEnded(ctx, hosted)
-	resp := &ateworkerpb.CheckpointWorkloadResponse{SnapshotFiles: snapshotFiles, DataSnapshotFiles: durableFiles}
+	resp := &ateworkerpb.CheckpointWorkloadResponse{SnapshotFiles: snapshotFiles, DataSnapshotFiles: append(durableFiles, diskFiles...)}
 	if err := ateworker.RecordCheckpoint(checkpointDir, s.bootID, scope, resp); err != nil {
 		slog.WarnContext(ctx, "Failed to record checkpoint completion marker", slog.String("actorUID", actorUID), slog.Any("err", err))
 	}
@@ -510,6 +520,11 @@ func (s *AteWorkerService) teardownActor(ctx context.Context, id string, actorDi
 	// disk-backed upper. Runs after the checkpoint tar, which is already on disk.
 	if err := os.RemoveAll(rootfsUpperDir(actorDirs)); err != nil {
 		slog.WarnContext(ctx, "Failed to remove rootfs upper dir", slog.String("actorUID", id), slog.Any("err", err))
+	}
+	// Disk images likewise: the VMM that held them is gone, and a checkpoint
+	// already copied them.
+	if err := removeDiskVolumes(actorDirs); err != nil {
+		slog.WarnContext(ctx, "Failed to remove disk volumes", slog.String("actorUID", id), slog.Any("err", err))
 	}
 
 	// Detach the bundle rootfs overlays composed in buildActorContainers, so

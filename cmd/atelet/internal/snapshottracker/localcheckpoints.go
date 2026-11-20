@@ -25,7 +25,7 @@ import (
 	"slices"
 
 	"go.ate.dev/substrate/cmd/atelet/internal/ateletpath"
-	"go.ate.dev/substrate/cmd/atelet/internal/sparsefile"
+	"go.ate.dev/substrate/internal/sparsefile"
 )
 
 // PruneLocalCheckpoints removes every local snapshot of the actor except those

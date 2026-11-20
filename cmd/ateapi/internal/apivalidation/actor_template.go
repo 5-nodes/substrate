@@ -62,20 +62,42 @@ func ValidateCustom_CreateActorTemplateRequest_ActorTemplate(_ context.Context, 
 		errs = append(errs, field.Forbidden(fldPath.Child("golden_egress_policy"), "requires golden snapshots to be enabled"))
 	}
 	declared := make(map[string]bool, len(value.GetVolumes()))
+	disks := map[string]bool{}
 	for _, vol := range value.GetVolumes() {
 		declared[vol.GetName()] = true
+		if vol.GetDisk() != nil {
+			disks[vol.GetName()] = true
+		}
 	}
+	attached := map[string]bool{}
 	for i, ctr := range value.GetContainers() {
 		for j, mount := range ctr.GetVolumeMounts() {
 			name := mount.GetName()
 			if name == "" {
 				continue // required is enforced by tags
 			}
-			if !declared[name] {
-				errs = append(errs, field.Invalid(
-					fldPath.Child("containers").Index(i).Child("volume_mounts").Index(j).Child("name"),
-					name, "must reference a volume declared in the template"))
+			path := fldPath.Child("containers").Index(i).Child("volume_mounts").Index(j).Child("name")
+			switch {
+			case !declared[name]:
+				errs = append(errs, field.Invalid(path, name, "must reference a volume declared in the template"))
+			case disks[name]:
+				errs = append(errs, field.Invalid(path, name, "is a disk volume; attach it with volume_devices"))
 			}
+		}
+		for j, dev := range ctr.GetVolumeDevices() {
+			name := dev.GetName()
+			if name == "" {
+				continue // required is enforced by tags
+			}
+			path := fldPath.Child("containers").Index(i).Child("volume_devices").Index(j).Child("name")
+			switch {
+			case !disks[name]:
+				errs = append(errs, field.Invalid(path, name, "must reference a disk volume declared in the template"))
+			case attached[name]:
+				// Two writers on one block device corrupt any filesystem on it.
+				errs = append(errs, field.Invalid(path, name, "is already attached; a disk volume may be attached once"))
+			}
+			attached[name] = true
 		}
 	}
 	return errs
@@ -189,4 +211,12 @@ func ValidateCustom_Capabilities_Drop(_ context.Context, _ operation.Operation, 
 // privileged: a privileged container gets every capability.
 func ValidateCustom_Container_SecurityContext(_ context.Context, _ operation.Operation, fldPath *field.Path, value, _ *ateapi.SecurityContext) field.ErrorList {
 	return resources.ValidatePrivilegedSecurityContext(fldPath, value.GetPrivileged(), value.GetCapabilities().GetAdd(), value.GetCapabilities().GetDrop())
+}
+
+func ValidateCustom_DiskVolumeSource_SizeBytes(_ context.Context, _ operation.Operation, fldPath *field.Path, value, _ *int64) field.ErrorList {
+	return resources.ValidateDiskVolumeSize(fldPath, *value)
+}
+
+func ValidateCustom_VolumeDevice_DevicePath(_ context.Context, _ operation.Operation, fldPath *field.Path, value, _ *string) field.ErrorList {
+	return resources.ValidateDevicePath(fldPath, *value)
 }

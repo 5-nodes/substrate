@@ -879,6 +879,56 @@ func Validate_Container(
 		errs = append(errs, fn(fldPath.Child("container_spec"), obj.ContainerSpec, oldVal, oldObj != nil)...)
 	}
 
+	{ // field ateworkerpb.Container.VolumeDevices
+		fn := func(
+			fldPath *field.Path,
+			obj, oldObj []*ateworkerpb.VolumeDevice,
+			oldValueCorrelated bool) (errs field.ErrorList) {
+			// don't revalidate unchanged data
+			if oldValueCorrelated && op.Type == operation.Update {
+				if ateDeepEqual(obj, oldObj) {
+					return nil
+				}
+			}
+			// call field-attached validations
+			earlyReturn := false
+			if e := validate.PtrSliceNoNils[ateworkerpb.VolumeDevice](ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
+				errs = append(errs, e...)
+				earlyReturn = true
+			}
+			if e := validate.MaxItems(ctx, op, fldPath, obj, oldObj, 8).MarkShortCircuit(); len(e) != 0 {
+				errs = append(errs, e...)
+				earlyReturn = true
+			}
+			if e := validate.OptionalSlice(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
+				earlyReturn = true
+			}
+			if earlyReturn {
+				return // do not proceed
+			}
+			// lists with map semantics require unique keys
+			if e := validate.PtrSliceUnique(ctx, op, fldPath, obj, oldObj,
+				func(a *ateworkerpb.VolumeDevice, b *ateworkerpb.VolumeDevice) bool {
+					return a.DevicePath == b.DevicePath
+				}); len(e) != 0 {
+				errs = append(errs, e...)
+			}
+			// iterate the list and call the type's validation function
+			if e := validate.EachPtrSliceVal(ctx, op, fldPath, obj, oldObj,
+				func(a *ateworkerpb.VolumeDevice, b *ateworkerpb.VolumeDevice) bool {
+					return a.DevicePath == b.DevicePath
+				}, ateDeepEqual, Validate_VolumeDevice); len(e) != 0 {
+				errs = append(errs, e...)
+			}
+			return
+		}
+		oldVal := safe.Field(oldObj,
+			func(oldObj *ateworkerpb.Container) []*ateworkerpb.VolumeDevice {
+				return oldObj.VolumeDevices
+			})
+		errs = append(errs, fn(fldPath.Child("volume_devices"), obj.VolumeDevices, oldVal, oldObj != nil)...)
+	}
+
 	return errs
 }
 
@@ -925,6 +975,79 @@ func Validate_ContainerSpec(
 	// field ateworkerpb.ContainerSpec.User has no validation
 	// field ateworkerpb.ContainerSpec.Cwd has no validation
 	// field ateworkerpb.ContainerSpec.Privileged has no validation
+	return errs
+}
+
+// Validate_DiskVolume validates an instance of DiskVolume according
+// to declarative validation rules in the API schema.
+func Validate_DiskVolume(
+	ctx context.Context, op operation.Operation, fldPath *field.Path,
+	obj, oldObj *ateworkerpb.DiskVolume) (errs field.ErrorList) {
+
+	{ // field ateworkerpb.DiskVolume.Name
+		fn := func(
+			fldPath *field.Path,
+			obj, oldObj *string,
+			oldValueCorrelated bool) (errs field.ErrorList) {
+			// don't revalidate unchanged data
+			if oldValueCorrelated && op.Type == operation.Update {
+				if obj == oldObj || (obj != nil && oldObj != nil && *obj == *oldObj) {
+					return nil
+				}
+			}
+			// call field-attached validations
+			earlyReturn := false
+			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
+				errs = append(errs, e...)
+				earlyReturn = true
+			}
+			if earlyReturn {
+				return // do not proceed
+			}
+			if e := validate.ShortName(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+				errs = append(errs, e...)
+			}
+			return
+		}
+		oldVal := safe.Field(oldObj,
+			func(oldObj *ateworkerpb.DiskVolume) *string {
+				return &oldObj.Name
+			})
+		errs = append(errs, fn(fldPath.Child("name"), &obj.Name, oldVal, oldObj != nil)...)
+	}
+
+	{ // field ateworkerpb.DiskVolume.SizeBytes
+		fn := func(
+			fldPath *field.Path,
+			obj, oldObj *int64,
+			oldValueCorrelated bool) (errs field.ErrorList) {
+			// don't revalidate unchanged data
+			if oldValueCorrelated && op.Type == operation.Update {
+				if obj == oldObj || (obj != nil && oldObj != nil && *obj == *oldObj) {
+					return nil
+				}
+			}
+			// call field-attached validations
+			earlyReturn := false
+			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
+				errs = append(errs, e...)
+				earlyReturn = true
+			}
+			if earlyReturn {
+				return // do not proceed
+			}
+			if e := validate.Minimum(ctx, op, fldPath, obj, oldObj, 1); len(e) != 0 {
+				errs = append(errs, e...)
+			}
+			return
+		}
+		oldVal := safe.Field(oldObj,
+			func(oldObj *ateworkerpb.DiskVolume) *int64 {
+				return &oldObj.SizeBytes
+			})
+		errs = append(errs, fn(fldPath.Child("size_bytes"), &obj.SizeBytes, oldVal, oldObj != nil)...)
+	}
+
 	return errs
 }
 
@@ -2302,6 +2425,79 @@ func Validate_TerminateWorkloadRequest(
 	return errs
 }
 
+// Validate_VolumeDevice validates an instance of VolumeDevice according
+// to declarative validation rules in the API schema.
+func Validate_VolumeDevice(
+	ctx context.Context, op operation.Operation, fldPath *field.Path,
+	obj, oldObj *ateworkerpb.VolumeDevice) (errs field.ErrorList) {
+
+	{ // field ateworkerpb.VolumeDevice.Name
+		fn := func(
+			fldPath *field.Path,
+			obj, oldObj *string,
+			oldValueCorrelated bool) (errs field.ErrorList) {
+			// don't revalidate unchanged data
+			if oldValueCorrelated && op.Type == operation.Update {
+				if obj == oldObj || (obj != nil && oldObj != nil && *obj == *oldObj) {
+					return nil
+				}
+			}
+			// call field-attached validations
+			earlyReturn := false
+			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
+				errs = append(errs, e...)
+				earlyReturn = true
+			}
+			if earlyReturn {
+				return // do not proceed
+			}
+			if e := validate.ShortName(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+				errs = append(errs, e...)
+			}
+			return
+		}
+		oldVal := safe.Field(oldObj,
+			func(oldObj *ateworkerpb.VolumeDevice) *string {
+				return &oldObj.Name
+			})
+		errs = append(errs, fn(fldPath.Child("name"), &obj.Name, oldVal, oldObj != nil)...)
+	}
+
+	{ // field ateworkerpb.VolumeDevice.DevicePath
+		fn := func(
+			fldPath *field.Path,
+			obj, oldObj *string,
+			oldValueCorrelated bool) (errs field.ErrorList) {
+			// don't revalidate unchanged data
+			if oldValueCorrelated && op.Type == operation.Update {
+				if obj == oldObj || (obj != nil && oldObj != nil && *obj == *oldObj) {
+					return nil
+				}
+			}
+			// call field-attached validations
+			earlyReturn := false
+			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
+				errs = append(errs, e...)
+				earlyReturn = true
+			}
+			if earlyReturn {
+				return // do not proceed
+			}
+			if e := validate.MaxLength(ctx, op, fldPath, obj, oldObj, 4096); len(e) != 0 {
+				errs = append(errs, e...)
+			}
+			return
+		}
+		oldVal := safe.Field(oldObj,
+			func(oldObj *ateworkerpb.VolumeDevice) *string {
+				return &oldObj.DevicePath
+			})
+		errs = append(errs, fn(fldPath.Child("device_path"), &obj.DevicePath, oldVal, oldObj != nil)...)
+	}
+
+	return errs
+}
+
 // Validate_VolumeMount validates an instance of VolumeMount according
 // to declarative validation rules in the API schema.
 func Validate_VolumeMount(
@@ -2504,6 +2700,52 @@ func Validate_WorkloadSpec(
 				return oldObj.Containers
 			})
 		errs = append(errs, fn(fldPath.Child("containers"), obj.Containers, oldVal, oldObj != nil)...)
+	}
+
+	{ // field ateworkerpb.WorkloadSpec.DiskVolumes
+		fn := func(
+			fldPath *field.Path,
+			obj, oldObj []*ateworkerpb.DiskVolume,
+			oldValueCorrelated bool) (errs field.ErrorList) {
+			// don't revalidate unchanged data
+			if oldValueCorrelated && op.Type == operation.Update {
+				if ateDeepEqual(obj, oldObj) {
+					return nil
+				}
+			}
+			// call field-attached validations
+			earlyReturn := false
+			if e := validate.PtrSliceNoNils[ateworkerpb.DiskVolume](ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
+				errs = append(errs, e...)
+				earlyReturn = true
+			}
+			if e := validate.MaxItems(ctx, op, fldPath, obj, oldObj, 8).MarkShortCircuit(); len(e) != 0 {
+				errs = append(errs, e...)
+				earlyReturn = true
+			}
+			if e := validate.OptionalSlice(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
+				earlyReturn = true
+			}
+			if earlyReturn {
+				return // do not proceed
+			}
+			// lists with map semantics require unique keys
+			if e := validate.PtrSliceUnique(ctx, op, fldPath, obj, oldObj,
+				func(a *ateworkerpb.DiskVolume, b *ateworkerpb.DiskVolume) bool { return a.Name == b.Name }); len(e) != 0 {
+				errs = append(errs, e...)
+			}
+			// iterate the list and call the type's validation function
+			if e := validate.EachPtrSliceVal(ctx, op, fldPath, obj, oldObj,
+				func(a *ateworkerpb.DiskVolume, b *ateworkerpb.DiskVolume) bool { return a.Name == b.Name }, ateDeepEqual, Validate_DiskVolume); len(e) != 0 {
+				errs = append(errs, e...)
+			}
+			return
+		}
+		oldVal := safe.Field(oldObj,
+			func(oldObj *ateworkerpb.WorkloadSpec) []*ateworkerpb.DiskVolume {
+				return oldObj.DiskVolumes
+			})
+		errs = append(errs, fn(fldPath.Child("disk_volumes"), obj.DiskVolumes, oldVal, oldObj != nil)...)
 	}
 
 	return errs

@@ -1389,6 +1389,15 @@ message Container {
   // +k8s:customValidation # capabilities must be unset when privileged
   SecurityContext security_context = 8;
 
+  // volume_devices attaches disk volumes as block devices. A disk volume may
+  // be attached to one container only.
+  //
+  // +k8s:optional
+  // +k8s:maxItems=8
+  // +k8s:listType=map
+  // +k8s:listMapKey=device_path
+  repeated VolumeDevice volume_devices = 10;
+
   // resources carries this container's compute limits, enforced inside the
   // actor's sandbox. A limit of 0 leaves that resource unlimited.
   //
@@ -1505,8 +1514,8 @@ message Volume {
   // +k8s:format=k8s-short-name
   string name = 1;
 
-  // Exactly one of durable_dir / external / image / system_info must be
-  // set.
+  // Exactly one of durable_dir / external / image / system_info / disk must
+  // be set.
   //
   // +k8s:optional
   // +k8s:unionMember
@@ -1529,6 +1538,48 @@ message Volume {
   // +k8s:optional
   // +k8s:unionMember
   ImageVolumeSource image = 5;
+
+  // disk is a raw block device local to the actor's sandbox that keeps its
+  // contents across suspend and resume. Attach it with a container's
+  // volume_devices, not volume_mounts. Only the microvm sandbox class
+  // supports it; other workers fail the actor.
+  //
+  // +k8s:optional
+  // +k8s:unionMember
+  DiskVolumeSource disk = 6;
+}
+
+// DiskVolumeSource is a virtio-blk disk backed by a sparse file on the
+// worker's node. The container sees an unformatted block device and decides
+// what goes on it: a filesystem it creates and mounts (which needs
+// securityContext.privileged), or raw data. Snapshots of every fidelity carry
+// the disk, so it keeps its contents across suspend and resume, and its written
+// blocks count against snapshot storage.
+message DiskVolumeSource {
+  // size_bytes is the size of the disk: at least 1 GiB, at most 1 TiB, and a
+  // multiple of 1 MiB. Only written blocks take space on the node and in
+  // snapshots.
+  //
+  // +k8s:required
+  // +k8s:customValidation # 1 GiB to 1 TiB, a multiple of 1 MiB
+  int64 size_bytes = 1;
+}
+
+// VolumeDevice attaches a disk volume to a container as a block device.
+message VolumeDevice {
+  // name must match the name of a disk Volume.
+  //
+  // +k8s:required
+  // +k8s:format=k8s-short-name
+  string name = 1;
+
+  // device_path is where the block device appears in the container: a clean
+  // absolute path under /dev, such as /dev/data.
+  //
+  // +k8s:required
+  // +k8s:maxLength=4096
+  // +k8s:customValidation # clean absolute path under /dev
+  string device_path = 2;
 }
 
 // ExternalVolumeSource is a CSI volume provisioned for the actor from a template.

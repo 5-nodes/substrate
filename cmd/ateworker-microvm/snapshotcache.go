@@ -30,7 +30,7 @@ func isSnapshotDataFile(name string, includeMemory bool) bool {
 	if includeMemory && name == memoryRangesFile {
 		return true
 	}
-	return strings.HasSuffix(name, ".tar")
+	return strings.HasSuffix(name, ".tar") || isDiskSnapshotFile(name)
 }
 
 // dropStagedMemoryImage drops the staged memory-ranges file and already-extracted

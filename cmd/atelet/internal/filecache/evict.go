@@ -27,7 +27,7 @@ import (
 	"syscall"
 	"time"
 
-	"go.ate.dev/substrate/cmd/atelet/internal/sparsefile"
+	"go.ate.dev/substrate/internal/sparsefile"
 )
 
 // TotalBytes sums the allocated (on-disk) bytes of all published entries'

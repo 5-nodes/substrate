@@ -129,6 +129,9 @@ func (r *runsc) writeSpec(containerName string) error {
 			// host kernel through runsc, so it never runs one.
 			return status.Errorf(codes.FailedPrecondition, "container %q is privileged; only microvm workers run privileged containers", containerName)
 		}
+		if len(r.containers[i].GetVolumeDevices()) > 0 {
+			return status.Errorf(codes.FailedPrecondition, "container %q attaches disk volumes; only microvm workers support them", containerName)
+		}
 		spec = ocispec.Build(ocispec.Options{ActorUID: r.actorUID, ActorDirs: r.actorDirs, Container: r.containers[i]})
 	}
 	ocispec.ShapeGVisor(spec, ocispec.GVisorOptions{

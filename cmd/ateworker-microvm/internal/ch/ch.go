@@ -26,6 +26,7 @@ package ch
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
@@ -128,3 +129,49 @@ func (c *Client) Snapshot(ctx context.Context, destDir string) error {
 // SnapshotURL returns the file:// URL cloud-hypervisor expects for a snapshot
 // destination or restore source directory.
 func SnapshotURL(dir string) string { return "file://" + dir }
+
+// AddDisk hot-plugs a virtio-blk device into the running VM via
+// /api/v1/vm.add-disk and returns its PCI address ("0000:00:06.0"). Hot-plug,
+// not vm.create: the kata-agent only sees devices whose uevent arrives while it
+// runs, which is why kata hot-plugs its block devices too.
+func (c *Client) AddDisk(ctx context.Context, cfg DiskConfig) (string, error) {
+	var info struct {
+		ID  string          `json:"id"`
+		Bdf json.RawMessage `json:"bdf"`
+	}
+	if err := c.api.putJSON(ctx, "/api/v1/vm.add-disk", cfg, &info); err != nil {
+		return "", fmt.Errorf("vm.add-disk %s: %w", cfg.ID, err)
+	}
+	if len(info.Bdf) == 0 {
+		return "", fmt.Errorf("vm.add-disk %s returned no PCI address", cfg.ID)
+	}
+	return parsePCIBDF(info.Bdf)
+}
+
+// parsePCIBDF reads a device tree pci_bdf: a "SSSS:BB:DD.F" string in current
+// cloud-hypervisor releases, a packed u32 in older ones.
+func parsePCIBDF(raw json.RawMessage) (string, error) {
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s, nil
+	}
+	var packed uint32
+	if err := json.Unmarshal(raw, &packed); err != nil {
+		return "", fmt.Errorf("unrecognized pci_bdf %s", raw)
+	}
+	return fmt.Sprintf("%04x:%02x:%02x.%x", packed>>16, (packed>>8)&0xff, (packed>>3)&0x1f, packed&0x7), nil
+}
+
+// KataPCIPath turns a PCI address on the root bus of segment 0 into the
+// kata-agent's PCI path for it: the device's slot as two hex digits. Devices
+// behind bridges or on other segments are not supported.
+func KataPCIPath(bdf string) (string, error) {
+	var seg, bus, dev, fn int
+	if _, err := fmt.Sscanf(bdf, "%x:%x:%x.%x", &seg, &bus, &dev, &fn); err != nil {
+		return "", fmt.Errorf("parsing PCI address %q: %w", bdf, err)
+	}
+	if seg != 0 || bus != 0 || fn != 0 {
+		return "", fmt.Errorf("PCI address %q is not on the root bus of segment 0", bdf)
+	}
+	return fmt.Sprintf("%02x", dev), nil
+}

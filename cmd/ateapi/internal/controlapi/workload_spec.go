@@ -88,6 +88,12 @@ func workloadSpecFromActorTemplate(actorTemplate *ateapi.ActorTemplate, actor *a
 				},
 			})
 
+		case vol.GetDisk() != nil:
+			workloadSpec.Volumes = append(workloadSpec.Volumes, &ateletpb.Volume{
+				Name: vol.GetName(),
+				Disk: &ateletpb.DiskVolumeSource{SizeBytes: vol.GetDisk().GetSizeBytes()},
+			})
+
 		default:
 			continue // Drop unrecognized volumes.
 		}
@@ -122,6 +128,12 @@ func workloadSpecFromActorTemplate(actorTemplate *ateapi.ActorTemplate, actor *a
 			ateletCtr.VolumeMounts = append(ateletCtr.VolumeMounts, &ateletpb.VolumeMount{
 				Name:      mount.GetName(),
 				MountPath: mount.GetMountPath(),
+			})
+		}
+		for _, dev := range ctr.GetVolumeDevices() {
+			ateletCtr.VolumeDevices = append(ateletCtr.VolumeDevices, &ateletpb.VolumeDevice{
+				Name:       dev.GetName(),
+				DevicePath: dev.GetDevicePath(),
 			})
 		}
 		workloadSpec.Containers = append(workloadSpec.Containers, ateletCtr)

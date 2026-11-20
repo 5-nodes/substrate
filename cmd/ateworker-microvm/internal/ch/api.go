@@ -77,6 +77,33 @@ func (c *apiClient) getJSON(ctx context.Context, path string, out any) error {
 	return json.Unmarshal(b, out)
 }
 
+// putJSON issues a PUT with a JSON body and decodes the 2xx JSON response
+// into out.
+func (c *apiClient) putJSON(ctx context.Context, path string, body, out any) error {
+	b, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, apiBase+path, bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	msg, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("PUT %s: status %d: %s", path, resp.StatusCode, bytes.TrimSpace(msg))
+	}
+	return json.Unmarshal(msg, out)
+}
+
 // put issues a PUT with an optional JSON body and checks for a 2xx status.
 func (c *apiClient) put(ctx context.Context, path string, body any) error {
 	var rdr io.Reader

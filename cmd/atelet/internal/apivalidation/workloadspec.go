@@ -157,3 +157,11 @@ func ValidateCustom_SystemInfoVolumeSource_DataSources(_ context.Context, _ oper
 func ValidateCustom_Container_SecurityContext(_ context.Context, _ operation.Operation, fldPath *field.Path, value, _ *ateletpb.SecurityContext) field.ErrorList {
 	return resources.ValidatePrivilegedSecurityContext(fldPath, value.GetPrivileged(), value.GetCapabilities().GetAdd(), value.GetCapabilities().GetDrop())
 }
+
+func ValidateCustom_DiskVolumeSource_SizeBytes(_ context.Context, _ operation.Operation, fldPath *field.Path, value, _ *int64) field.ErrorList {
+	return resources.ValidateDiskVolumeSize(fldPath, *value)
+}
+
+func ValidateCustom_VolumeDevice_DevicePath(_ context.Context, _ operation.Operation, fldPath *field.Path, value, _ *string) field.ErrorList {
+	return resources.ValidateDevicePath(fldPath, *value)
+}

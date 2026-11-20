@@ -146,3 +146,25 @@ func TestWaitReadyTimesOut(t *testing.T) {
 		t.Fatal("WaitReady returned nil for a dead socket, want timeout error")
 	}
 }
+
+func TestPCIAddresses(t *testing.T) {
+	for _, tc := range []struct{ raw, bdf, path string }{
+		{`"0000:00:06.0"`, "0000:00:06.0", "06"},
+		{`48`, "0000:00:06.0", "06"}, // packed u32: device 6 << 3
+		{`"0000:00:1f.0"`, "0000:00:1f.0", "1f"},
+	} {
+		bdf, err := parsePCIBDF(json.RawMessage(tc.raw))
+		if err != nil || bdf != tc.bdf {
+			t.Errorf("parsePCIBDF(%s) = %q, %v; want %q", tc.raw, bdf, err, tc.bdf)
+			continue
+		}
+		if path, err := KataPCIPath(bdf); err != nil || path != tc.path {
+			t.Errorf("KataPCIPath(%q) = %q, %v; want %q", bdf, path, err, tc.path)
+		}
+	}
+	for _, bad := range []string{"0001:00:06.0", "0000:01:00.0", "0000:00:06.1", "junk"} {
+		if _, err := KataPCIPath(bad); err == nil {
+			t.Errorf("KataPCIPath(%q) succeeded; want an error", bad)
+		}
+	}
+}

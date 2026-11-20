@@ -44,7 +44,6 @@ import (
 	"go.ate.dev/substrate/cmd/atelet/internal/filecache"
 	"go.ate.dev/substrate/cmd/atelet/internal/filecachegc"
 	"go.ate.dev/substrate/cmd/atelet/internal/snapshottracker"
-	"go.ate.dev/substrate/cmd/atelet/internal/sparsefile"
 	"go.ate.dev/substrate/cmd/atelet/internal/trustbundle"
 	"go.ate.dev/substrate/internal/actorlock"
 	"go.ate.dev/substrate/internal/apierror"
@@ -66,6 +65,7 @@ import (
 	"go.ate.dev/substrate/internal/proto/ateworkerpb"
 	"go.ate.dev/substrate/internal/resources"
 	"go.ate.dev/substrate/internal/serverboot"
+	"go.ate.dev/substrate/internal/sparsefile"
 	"go.ate.dev/substrate/internal/substratex509"
 	"go.ate.dev/substrate/internal/version"
 	"go.ate.dev/substrate/internal/volume"
@@ -1383,7 +1383,7 @@ func shouldHaveSnapshots(req *ateletpb.CheckpointRequest) bool {
 	}
 
 	for _, vol := range req.GetSpec().GetVolumes() {
-		if vol.GetDurableDir() != nil {
+		if vol.GetDurableDir() != nil || vol.GetDisk() != nil {
 			return true
 		}
 	}
@@ -2318,6 +2318,11 @@ func buildWorkerWorkloadSpec(spec *ateletpb.WorkloadSpec, containerSpecs []*atew
 	}
 
 	out := &ateworkerpb.WorkloadSpec{}
+	for _, vol := range spec.GetVolumes() {
+		if d := vol.GetDisk(); d != nil {
+			out.DiskVolumes = append(out.DiskVolumes, &ateworkerpb.DiskVolume{Name: vol.GetName(), SizeBytes: d.GetSizeBytes()})
+		}
+	}
 	for i, ctr := range spec.GetContainers() {
 		var ddMounts []*ateworkerpb.VolumeMount
 		var extMounts []*ateworkerpb.VolumeMount
@@ -2351,11 +2356,21 @@ func buildWorkerWorkloadSpec(spec *ateletpb.WorkloadSpec, containerSpecs []*atew
 					Name:      volName,
 					MountPath: vm.GetMountPath(),
 				})
+			case vol.GetDisk() != nil:
+				return nil, fmt.Errorf("container %q mounts disk volume %q; disk volumes are attached with volume_devices", ctr.GetName(), volName)
 			default:
 				return nil, fmt.Errorf("container %q mounts volume %q with no source set", ctr.GetName(), volName)
 			}
 		}
+		var devices []*ateworkerpb.VolumeDevice
+		for _, dev := range ctr.GetVolumeDevices() {
+			if volumes[dev.GetName()].GetDisk() == nil {
+				return nil, fmt.Errorf("container %q attaches volume %q, which is not a disk volume", ctr.GetName(), dev.GetName())
+			}
+			devices = append(devices, &ateworkerpb.VolumeDevice{Name: dev.GetName(), DevicePath: dev.GetDevicePath()})
+		}
 		container := &ateworkerpb.Container{
+			VolumeDevices:          devices,
 			Name:                   ctr.GetName(),
 			DurableDirVolumeMounts: ddMounts,
 			ExternalVolumeMounts:   extMounts,

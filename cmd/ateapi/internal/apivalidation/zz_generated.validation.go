@@ -2115,6 +2115,52 @@ func Validate_Container(
 		errs = append(errs, fn(fldPath.Child("security_context"), obj.SecurityContext, oldVal, oldObj != nil)...)
 	}
 
+	{ // field v1.Container.VolumeDevices
+		fn := func(
+			fldPath *field.Path,
+			obj, oldObj []*v1.VolumeDevice,
+			oldValueCorrelated bool) (errs field.ErrorList) {
+			// don't revalidate unchanged data
+			if oldValueCorrelated && op.Type == operation.Update {
+				if ateDeepEqual(obj, oldObj) {
+					return nil
+				}
+			}
+			// call field-attached validations
+			earlyReturn := false
+			if e := validate.PtrSliceNoNils[v1.VolumeDevice](ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
+				errs = append(errs, e...)
+				earlyReturn = true
+			}
+			if e := validate.MaxItems(ctx, op, fldPath, obj, oldObj, 8).MarkShortCircuit(); len(e) != 0 {
+				errs = append(errs, e...)
+				earlyReturn = true
+			}
+			if e := validate.OptionalSlice(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
+				earlyReturn = true
+			}
+			if earlyReturn {
+				return // do not proceed
+			}
+			// lists with map semantics require unique keys
+			if e := validate.PtrSliceUnique(ctx, op, fldPath, obj, oldObj,
+				func(a *v1.VolumeDevice, b *v1.VolumeDevice) bool { return a.DevicePath == b.DevicePath }); len(e) != 0 {
+				errs = append(errs, e...)
+			}
+			// iterate the list and call the type's validation function
+			if e := validate.EachPtrSliceVal(ctx, op, fldPath, obj, oldObj,
+				func(a *v1.VolumeDevice, b *v1.VolumeDevice) bool { return a.DevicePath == b.DevicePath }, ateDeepEqual, Validate_VolumeDevice); len(e) != 0 {
+				errs = append(errs, e...)
+			}
+			return
+		}
+		oldVal := safe.Field(oldObj,
+			func(oldObj *v1.Container) []*v1.VolumeDevice {
+				return oldObj.VolumeDevices
+			})
+		errs = append(errs, fn(fldPath.Child("volume_devices"), obj.VolumeDevices, oldVal, oldObj != nil)...)
+	}
+
 	{ // field v1.Container.Resources
 		fn := func(
 			fldPath *field.Path,
@@ -3478,6 +3524,48 @@ func Validate_DeleteWorkerRequest(
 				return oldObj.Options
 			})
 		errs = append(errs, fn(fldPath.Child("options"), obj.Options, oldVal, oldObj != nil)...)
+	}
+
+	return errs
+}
+
+// Validate_DiskVolumeSource validates an instance of DiskVolumeSource according
+// to declarative validation rules in the API schema.
+func Validate_DiskVolumeSource(
+	ctx context.Context, op operation.Operation, fldPath *field.Path,
+	obj, oldObj *v1.DiskVolumeSource) (errs field.ErrorList) {
+
+	{ // field v1.DiskVolumeSource.SizeBytes
+		fn := func(
+			fldPath *field.Path,
+			obj, oldObj *int64,
+			oldValueCorrelated bool) (errs field.ErrorList) {
+			// don't revalidate unchanged data
+			if oldValueCorrelated && op.Type == operation.Update {
+				if obj == oldObj || (obj != nil && oldObj != nil && *obj == *oldObj) {
+					return nil
+				}
+			}
+			// call field-attached validations
+			earlyReturn := false
+			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
+				errs = append(errs, e...)
+				earlyReturn = true
+			}
+			if earlyReturn {
+				return // do not proceed
+			}
+			// custom validation
+			if e := ValidateCustom_DiskVolumeSource_SizeBytes(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+				errs = append(errs, e...)
+			}
+			return
+		}
+		oldVal := safe.Field(oldObj,
+			func(oldObj *v1.DiskVolumeSource) *int64 {
+				return &oldObj.SizeBytes
+			})
+		errs = append(errs, fn(fldPath.Child("size_bytes"), &obj.SizeBytes, oldVal, oldObj != nil)...)
 	}
 
 	return errs
@@ -9757,7 +9845,7 @@ func Validate_VersionedSandboxCompat(
 	return errs
 }
 
-var unionMembershipFor_go_ate_dev_substrate_api_ateapi_v1_Volume_ = validate.NewUnionMembership(validate.NewUnionMember("durable_dir"), validate.NewUnionMember("external"), validate.NewUnionMember("system_info"), validate.NewUnionMember("image"))
+var unionMembershipFor_go_ate_dev_substrate_api_ateapi_v1_Volume_ = validate.NewUnionMembership(validate.NewUnionMember("durable_dir"), validate.NewUnionMember("external"), validate.NewUnionMember("system_info"), validate.NewUnionMember("image"), validate.NewUnionMember("disk"))
 
 // Validate_Volume validates an instance of Volume according
 // to declarative validation rules in the API schema.
@@ -9789,6 +9877,12 @@ func Validate_Volume(
 				return false
 			}
 			return obj.Image != nil
+		},
+		func(obj *v1.Volume) bool {
+			if obj == nil {
+				return false
+			}
+			return obj.Disk != nil
 		}); len(e) != 0 {
 		errs = append(errs, e...)
 	}
@@ -9948,6 +10042,113 @@ func Validate_Volume(
 				return oldObj.Image
 			})
 		errs = append(errs, fn(fldPath.Child("image"), obj.Image, oldVal, oldObj != nil)...)
+	}
+
+	{ // field v1.Volume.Disk
+		fn := func(
+			fldPath *field.Path,
+			obj, oldObj *v1.DiskVolumeSource,
+			oldValueCorrelated bool) (errs field.ErrorList) {
+			// don't revalidate unchanged data
+			if oldValueCorrelated && op.Type == operation.Update {
+				if ateDeepEqual(obj, oldObj) {
+					return nil
+				}
+			}
+			// call field-attached validations
+			earlyReturn := false
+			if e := validate.OptionalPointer(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
+				earlyReturn = true
+			}
+			if earlyReturn {
+				return // do not proceed
+			}
+			// call the type's validation function
+			errs = append(errs, Validate_DiskVolumeSource(ctx, op, fldPath, obj, oldObj)...)
+			return
+		}
+		oldVal := safe.Field(oldObj,
+			func(oldObj *v1.Volume) *v1.DiskVolumeSource {
+				return oldObj.Disk
+			})
+		errs = append(errs, fn(fldPath.Child("disk"), obj.Disk, oldVal, oldObj != nil)...)
+	}
+
+	return errs
+}
+
+// Validate_VolumeDevice validates an instance of VolumeDevice according
+// to declarative validation rules in the API schema.
+func Validate_VolumeDevice(
+	ctx context.Context, op operation.Operation, fldPath *field.Path,
+	obj, oldObj *v1.VolumeDevice) (errs field.ErrorList) {
+
+	{ // field v1.VolumeDevice.Name
+		fn := func(
+			fldPath *field.Path,
+			obj, oldObj *string,
+			oldValueCorrelated bool) (errs field.ErrorList) {
+			// don't revalidate unchanged data
+			if oldValueCorrelated && op.Type == operation.Update {
+				if obj == oldObj || (obj != nil && oldObj != nil && *obj == *oldObj) {
+					return nil
+				}
+			}
+			// call field-attached validations
+			earlyReturn := false
+			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
+				errs = append(errs, e...)
+				earlyReturn = true
+			}
+			if earlyReturn {
+				return // do not proceed
+			}
+			if e := validate.ShortName(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+				errs = append(errs, e...)
+			}
+			return
+		}
+		oldVal := safe.Field(oldObj,
+			func(oldObj *v1.VolumeDevice) *string {
+				return &oldObj.Name
+			})
+		errs = append(errs, fn(fldPath.Child("name"), &obj.Name, oldVal, oldObj != nil)...)
+	}
+
+	{ // field v1.VolumeDevice.DevicePath
+		fn := func(
+			fldPath *field.Path,
+			obj, oldObj *string,
+			oldValueCorrelated bool) (errs field.ErrorList) {
+			// don't revalidate unchanged data
+			if oldValueCorrelated && op.Type == operation.Update {
+				if obj == oldObj || (obj != nil && oldObj != nil && *obj == *oldObj) {
+					return nil
+				}
+			}
+			// call field-attached validations
+			earlyReturn := false
+			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
+				errs = append(errs, e...)
+				earlyReturn = true
+			}
+			if earlyReturn {
+				return // do not proceed
+			}
+			// custom validation
+			if e := ValidateCustom_VolumeDevice_DevicePath(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+				errs = append(errs, e...)
+			}
+			if e := validate.MaxLength(ctx, op, fldPath, obj, oldObj, 4096); len(e) != 0 {
+				errs = append(errs, e...)
+			}
+			return
+		}
+		oldVal := safe.Field(oldObj,
+			func(oldObj *v1.VolumeDevice) *string {
+				return &oldObj.DevicePath
+			})
+		errs = append(errs, fn(fldPath.Child("device_path"), &obj.DevicePath, oldVal, oldObj != nil)...)
 	}
 
 	return errs

@@ -762,7 +762,8 @@ message Volume {
   // +k8s:format=k8s-short-name
   string name = 1;
 
-  // Exactly one of durable_dir / external / system_info / image must be set.
+  // Exactly one of durable_dir / external / system_info / image / disk must
+  // be set.
   //
   // +k8s:optional
   // +k8s:unionMember
@@ -779,6 +780,31 @@ message Volume {
   // +k8s:optional
   // +k8s:unionMember
   ImageVolumeSource image = 5;
+
+  // disk mirrors ateapi.Volume.disk.
+  //
+  // +k8s:optional
+  // +k8s:unionMember
+  DiskVolumeSource disk = 6;
+}
+
+// DiskVolumeSource mirrors ateapi.DiskVolumeSource.
+message DiskVolumeSource {
+  // +k8s:required
+  // +k8s:customValidation # 1 GiB to 1 TiB, a multiple of 1 MiB
+  int64 size_bytes = 1;
+}
+
+// VolumeDevice mirrors ateapi.VolumeDevice.
+message VolumeDevice {
+  // +k8s:required
+  // +k8s:format=k8s-short-name
+  string name = 1;
+
+  // +k8s:required
+  // +k8s:maxLength=4096
+  // +k8s:customValidation # clean absolute path under /dev
+  string device_path = 2;
 }
 
 message VolumeMount {
@@ -847,6 +873,14 @@ message Container {
   //
   // +k8s:optional
   ResourceRequirements resources = 9;
+
+  // volume_devices mirrors ateapi.Container.volume_devices.
+  //
+  // +k8s:optional
+  // +k8s:maxItems=8
+  // +k8s:listType=map
+  // +k8s:listMapKey=device_path
+  repeated VolumeDevice volume_devices = 10;
 }
 
 // SecurityContext holds security settings for a container's process.

@@ -95,6 +95,21 @@ func SpecToAgentPB(s *specs.Spec) *agentpb.Spec {
 			ReadonlyPaths: s.Linux.ReadonlyPaths,
 			Sysctl:        s.Linux.Sysctl,
 		}
+		// Device nodes to create in the container (disk volumes). The kata-agent
+		// rewrites the numbers of the ones a CreateContainer device names.
+		for _, d := range s.Linux.Devices {
+			ld := &agentpb.LinuxDevice{Path: d.Path, Type: d.Type, Major: d.Major, Minor: d.Minor}
+			if d.FileMode != nil {
+				ld.FileMode = uint32(*d.FileMode)
+			}
+			if d.UID != nil {
+				ld.UID = *d.UID
+			}
+			if d.GID != nil {
+				ld.GID = *d.GID
+			}
+			l.Devices = append(l.Devices, ld)
+		}
 		// TODO: forward the remaining OCI security knobs the kata-agent supports
 		// for parity with the OCI spec — Linux.Seccomp here, and
 		// Process.ApparmorProfile / Process.SelinuxLabel above. The MVP runs the
