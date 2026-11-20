@@ -159,6 +159,11 @@ spec:
     - podSelector:
         matchLabels:
           batch.kubernetes.io/job-name: rustfs-bucket-init
+    # ate-setup's microVM asset stager on clusters without a kind node
+    # container to run the upload from (steps.startAssetStagerPod).
+    - podSelector:
+        matchLabels:
+          app: microvm-asset-stager
     ports:
     - protocol: TCP
       port: api

@@ -652,7 +652,14 @@ func TestStageMicroVMAssetsToRustfs(t *testing.T) {
 		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "kind-worker2"}},
 		&appsv1.Deployment{
 			ObjectMeta: metav1.ObjectMeta{Name: "rustfs", Namespace: "ate-system", Generation: 1},
-			Spec:       appsv1.DeploymentSpec{Replicas: &replicas},
+			Spec: appsv1.DeploymentSpec{
+				Replicas: &replicas,
+				Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{
+					Name: "rustfs",
+					// Credentials an install replaced, not the kind defaults.
+					Env: []corev1.EnvVar{{Name: "RUSTFS_ACCESS_KEY", Value: "custom-access"}, {Name: "RUSTFS_SECRET_KEY", Value: "custom-secret"}},
+				}}}},
+			},
 			Status: appsv1.DeploymentStatus{
 				ObservedGeneration: 1,
 				Replicas:           1,
@@ -708,6 +715,9 @@ func TestStageMicroVMAssetsToRustfs(t *testing.T) {
 	got := string(gotBytes)
 	if !strings.Contains(got, "--network container:kind-worker2") {
 		t.Errorf("expected rustfs pod's node (kind-worker2) in docker args, got:\n%s", got)
+	}
+	if !strings.Contains(got, "AWS_ACCESS_KEY_ID=custom-access") || !strings.Contains(got, "AWS_SECRET_ACCESS_KEY=custom-secret") {
+		t.Errorf("expected the rustfs Deployment's credentials in docker args, got:\n%s", got)
 	}
 	if !strings.Contains(got, "AWS_ENDPOINT_URL=http://[fd00:10:96::1234]:9000") {
 		t.Errorf("expected bracketed IPv6 endpoint URL in docker args, got:\n%s", got)

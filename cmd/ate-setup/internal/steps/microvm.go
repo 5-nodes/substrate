@@ -607,10 +607,6 @@ func (e *Env) stageMicroVMAssetsToRustfs(ctx context.Context, bucket string, dig
 		return err
 	}
 
-	node, err := e.rustfsNodeName(ctx, ns)
-	if err != nil {
-		return err
-	}
 	svc, err := e.Kube.Typed.CoreV1().Services(ns).Get(ctx, "rustfs", metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("while getting service %s/rustfs: %w", ns, err)
@@ -619,28 +615,35 @@ func (e *Env) stageMicroVMAssetsToRustfs(ctx context.Context, bucket string, dig
 		return fmt.Errorf("service %s/rustfs has no ClusterIP", ns)
 	}
 	endpoint := "http://" + net.JoinHostPort(svc.Spec.ClusterIP, "9000")
-
-	// Credentials and region are fixed in manifests/ate-install/kind/rustfs.yaml.
-	awsCLIArgs := func(args ...string) []string {
-		return append([]string{
-			"run", "--rm", "-i",
-			"--network", "container:" + node,
-			"-e", "AWS_ACCESS_KEY_ID=rustfsadmin",
-			"-e", "AWS_SECRET_ACCESS_KEY=rustfsadmin",
-			"-e", "AWS_REGION=us-east-1",
-			"-e", "AWS_ENDPOINT_URL=" + endpoint,
-			rustfsAWSCLIImage,
-		}, args...)
-	}
-	awsCLI := func(stdin io.Reader, args ...string) error {
-		return e.runCmd(ctx, stdin, "docker", awsCLIArgs(args...)...)
+	accessKey, secretKey, err := e.rustfsCredentials(ctx, ns)
+	if err != nil {
+		return err
 	}
 
-	// rustfs-bucket-init creates only defaultKindMicroVMBucket. Run head-bucket
-	// via runCmdOutput so an expected 404 miss does not print to stderr.
+	// On kind the AWS CLI runs in a local container joined to the rustfs
+	// node's network namespace. Any other cluster (no node container to join)
+	// runs it in a short-lived pod that rustfs's NetworkPolicy admits.
+	var cli s3CLI
+	via := ""
+	node, nodeErr := e.rustfsNodeName(ctx, ns)
+	if nodeErr == nil && e.isDockerContainer(ctx, node) {
+		cli = &dockerS3CLI{e: e, node: node, endpoint: endpoint, accessKey: accessKey, secretKey: secretKey}
+		via = "netns of " + node
+	} else {
+		pod, cleanup, err := e.startAssetStagerPod(ctx, ns, endpoint, accessKey, secretKey, timeout)
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		cli = &podS3CLI{e: e, ns: ns, pod: pod}
+		via = "pod " + ns + "/" + pod
+	}
+
+	// rustfs-bucket-init creates only defaultKindMicroVMBucket. An expected
+	// 404 miss from head-bucket does not print to stderr.
 	if bucket != defaultKindMicroVMBucket {
-		if _, err := e.runCmdOutput(ctx, "docker", awsCLIArgs("s3api", "head-bucket", "--bucket", bucket)...); err != nil {
-			if err := awsCLI(nil, "s3api", "create-bucket", "--bucket", bucket); err != nil {
+		if _, err := cli.output(ctx, "s3api", "head-bucket", "--bucket", bucket); err != nil {
+			if err := cli.run(ctx, nil, "s3api", "create-bucket", "--bucket", bucket); err != nil {
 				return fmt.Errorf("while creating bucket %s in rustfs: %w", bucket, err)
 			}
 		}
@@ -648,10 +651,10 @@ func (e *Env) stageMicroVMAssetsToRustfs(ctx context.Context, bucket string, dig
 
 	prefixURL := fmt.Sprintf("s3://%s/%s/", bucket, microvmAssetsPrefix)
 	// s3 ls exits non-zero when the prefix has no objects yet; cp surfaces real errors.
-	lsOut, _ := e.runCmdOutput(ctx, "docker", awsCLIArgs("s3", "ls", "--recursive", prefixURL)...)
+	lsOut, _ := cli.output(ctx, "s3", "ls", "--recursive", prefixURL)
 	existing := fieldsSet(lsOut)
 
-	log.Infof(">> Uploading assets to %s via %s (netns of %s)...", prefixURL, endpoint, node)
+	log.Infof(">> Uploading assets to %s via %s (%s)...", prefixURL, endpoint, via)
 	for _, arch := range e.microVMArches() {
 		outDir := e.Cfg.Path("bin", microvmAssetsPrefix, arch)
 		for _, f := range microvmAssets {
@@ -667,7 +670,7 @@ func (e *Env) stageMicroVMAssetsToRustfs(ctx context.Context, bucket string, dig
 				return err
 			}
 			dst := fmt.Sprintf("s3://%s/%s", bucket, key)
-			err = awsCLI(file, "s3", "cp", "-", dst)
+			err = cli.run(ctx, file, "s3", "cp", "-", dst)
 			_ = file.Close()
 			if err != nil {
 				return fmt.Errorf("while uploading %s/%s to rustfs: %w", arch, f, err)
@@ -676,7 +679,147 @@ func (e *Env) stageMicroVMAssetsToRustfs(ctx context.Context, bucket string, dig
 	}
 
 	log.Infof(">> Done. Verify:")
-	return awsCLI(nil, "s3", "ls", "--recursive", prefixURL)
+	return cli.run(ctx, nil, "s3", "ls", "--recursive", prefixURL)
+}
+
+// s3CLI runs AWS CLI commands against the in-cluster rustfs.
+type s3CLI interface {
+	run(ctx context.Context, stdin io.Reader, args ...string) error
+	output(ctx context.Context, args ...string) (string, error)
+}
+
+// dockerS3CLI runs the AWS CLI in a local container that shares the network
+// namespace of a kind node.
+type dockerS3CLI struct {
+	e                                    *Env
+	node, endpoint, accessKey, secretKey string
+}
+
+func (d *dockerS3CLI) args(args ...string) []string {
+	return append([]string{
+		"run", "--rm", "-i",
+		"--network", "container:" + d.node,
+		"-e", "AWS_ACCESS_KEY_ID=" + d.accessKey,
+		"-e", "AWS_SECRET_ACCESS_KEY=" + d.secretKey,
+		"-e", "AWS_REGION=us-east-1",
+		"-e", "AWS_ENDPOINT_URL=" + d.endpoint,
+		rustfsAWSCLIImage,
+	}, args...)
+}
+
+func (d *dockerS3CLI) run(ctx context.Context, stdin io.Reader, args ...string) error {
+	return d.e.runCmd(ctx, stdin, "docker", d.args(args...)...)
+}
+
+func (d *dockerS3CLI) output(ctx context.Context, args ...string) (string, error) {
+	return d.e.runCmdOutput(ctx, "docker", d.args(args...)...)
+}
+
+// podS3CLI runs the AWS CLI by exec in the asset stager pod.
+type podS3CLI struct {
+	e       *Env
+	ns, pod string
+}
+
+func (p *podS3CLI) run(ctx context.Context, stdin io.Reader, args ...string) error {
+	return p.e.Kube.Exec(ctx, p.ns, p.pod, "", append([]string{"aws"}, args...), stdin, os.Stdout, os.Stderr)
+}
+
+func (p *podS3CLI) output(ctx context.Context, args ...string) (string, error) {
+	var out bytes.Buffer
+	err := p.e.Kube.Exec(ctx, p.ns, p.pod, "", append([]string{"aws"}, args...), nil, &out, io.Discard)
+	return out.String(), err
+}
+
+// microVMAssetStagerLabel marks the asset stager pod; rustfs's NetworkPolicy
+// admits it.
+const microVMAssetStagerLabel = "microvm-asset-stager"
+
+// startAssetStagerPod starts an idle AWS CLI pod next to rustfs and waits for
+// it to run. cleanup deletes it.
+func (e *Env) startAssetStagerPod(ctx context.Context, ns, endpoint, accessKey, secretKey string, timeout time.Duration) (string, func(), error) {
+	pods := e.Kube.Typed.CoreV1().Pods(ns)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: microVMAssetStagerLabel + "-",
+			Labels:       map[string]string{"app": microVMAssetStagerLabel},
+		},
+		Spec: corev1.PodSpec{
+			RestartPolicy:                corev1.RestartPolicyNever,
+			AutomountServiceAccountToken: new(false),
+			Containers: []corev1.Container{{
+				Name:    "aws",
+				Image:   rustfsAWSCLIImage,
+				Command: []string{"sleep", "3600"},
+				Env: []corev1.EnvVar{
+					{Name: "AWS_ACCESS_KEY_ID", Value: accessKey},
+					{Name: "AWS_SECRET_ACCESS_KEY", Value: secretKey},
+					{Name: "AWS_REGION", Value: "us-east-1"},
+					{Name: "AWS_ENDPOINT_URL", Value: endpoint},
+				},
+			}},
+		},
+	}
+	created, err := pods.Create(ctx, pod, metav1.CreateOptions{})
+	if err != nil {
+		return "", nil, fmt.Errorf("while creating the microVM asset stager pod: %w", err)
+	}
+	name := created.Name
+	cleanup := func() {
+		_ = pods.Delete(context.WithoutCancel(ctx), name, metav1.DeleteOptions{GracePeriodSeconds: new(int64(0))})
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		p, err := pods.Get(ctx, name, metav1.GetOptions{})
+		if err == nil && p.Status.Phase == corev1.PodRunning {
+			return name, cleanup, nil
+		}
+		if err == nil && (p.Status.Phase == corev1.PodFailed || p.Status.Phase == corev1.PodSucceeded) {
+			cleanup()
+			return "", nil, fmt.Errorf("microVM asset stager pod %s/%s ended in phase %s", ns, name, p.Status.Phase)
+		}
+		if time.Now().After(deadline) {
+			cleanup()
+			return "", nil, fmt.Errorf("microVM asset stager pod %s/%s did not start within %v", ns, name, timeout)
+		}
+		select {
+		case <-ctx.Done():
+			cleanup()
+			return "", nil, ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
+}
+
+// rustfsCredentials reads the access and secret key from the rustfs
+// Deployment, so an install that replaced the kind defaults still stages.
+func (e *Env) rustfsCredentials(ctx context.Context, ns string) (string, string, error) {
+	d, err := e.Kube.Typed.AppsV1().Deployments(ns).Get(ctx, "rustfs", metav1.GetOptions{})
+	if err != nil {
+		return "", "", fmt.Errorf("while getting deployment %s/rustfs: %w", ns, err)
+	}
+	access, secret := "", ""
+	for _, c := range d.Spec.Template.Spec.Containers {
+		for _, env := range c.Env {
+			switch env.Name {
+			case "RUSTFS_ACCESS_KEY":
+				access = env.Value
+			case "RUSTFS_SECRET_KEY":
+				secret = env.Value
+			}
+		}
+	}
+	if access == "" || secret == "" {
+		return "", "", fmt.Errorf("deployment %s/rustfs sets no literal RUSTFS_ACCESS_KEY/RUSTFS_SECRET_KEY", ns)
+	}
+	return access, secret, nil
+}
+
+// isDockerContainer reports whether name is a local Docker container, as a
+// kind node is.
+func (e *Env) isDockerContainer(ctx context.Context, name string) bool {
+	_, err := e.runCmdOutput(ctx, "docker", "inspect", "--type", "container", name)
+	return err == nil
 }
 
 // rustfsNodeName returns the node hosting the rustfs pod so the S3 upload
