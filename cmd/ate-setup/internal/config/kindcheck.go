@@ -27,15 +27,21 @@ import (
 
 // CheckKindCluster checks local deployment prerequisites without creating or
 // replacing a cluster. It uses the same kubeconfig loading rules as the clients.
+//
+// Docker is required only to build images. A pre-built install
+// (--image-repo) builds nothing, so it can run without Docker, for example
+// from a Job inside the cluster, where the asset staging falls back to a pod.
 func (c *Config) CheckKindCluster(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, "docker", "info").CombinedOutput()
-	if err != nil {
-		if ctx.Err() != nil {
-			err = ctx.Err()
+	if !c.Images.IsPrebuilt() {
+		output, err := exec.CommandContext(ctx, "docker", "info").CombinedOutput()
+		if err != nil {
+			if ctx.Err() != nil {
+				err = ctx.Err()
+			}
+			return fmt.Errorf("cannot access Docker; start Docker and check `docker info` before deploying to Kind: %w\n%s", err, strings.TrimSpace(string(output)))
 		}
-		return fmt.Errorf("cannot access Docker; start Docker and check `docker info` before deploying to Kind: %w\n%s", err, strings.TrimSpace(string(output)))
 	}
 
 	rules := clientcmd.NewDefaultClientConfigLoadingRules()

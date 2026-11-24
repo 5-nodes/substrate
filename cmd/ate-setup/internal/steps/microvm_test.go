@@ -40,6 +40,7 @@ import (
 
 	atev1 "go.ate.dev/substrate/api/infra/k8s/ate/v1"
 	"go.ate.dev/substrate/cmd/ate-setup/internal/config"
+	"go.ate.dev/substrate/cmd/ate-setup/internal/images"
 	"go.ate.dev/substrate/cmd/ate-setup/internal/kube"
 	"go.ate.dev/substrate/cmd/ate-setup/internal/log"
 	"go.ate.dev/substrate/cmd/ate-setup/internal/render"
@@ -764,6 +765,13 @@ func TestCheckMicroVMDepsRequiresStageTool(t *testing.T) {
 		env := &Env{Cfg: &config.Config{Kind: true}}
 		if _, err := env.checkMicroVMDeps(); err == nil || !strings.Contains(err.Error(), "docker") {
 			t.Fatalf("checkMicroVMDeps() on Kind without docker = %v, want docker error", err)
+		}
+	})
+
+	t.Run("pre-built Kind does not require docker", func(t *testing.T) {
+		env := &Env{Cfg: &config.Config{Kind: true, Images: images.Source{Repo: "registry.example.com/substrate", Tag: "v1"}}}
+		if _, err := env.checkMicroVMDeps(); err != nil {
+			t.Fatalf("checkMicroVMDeps() on pre-built Kind without docker = %v, want nil", err)
 		}
 	})
 

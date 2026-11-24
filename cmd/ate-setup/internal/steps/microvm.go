@@ -275,7 +275,10 @@ func (e *Env) checkMicroVMDeps() (string, error) {
 		return "", err
 	}
 	if e.Cfg.Kind {
-		if _, err := exec.LookPath("docker"); err != nil {
+		// A pre-built install may run without docker, from a pod in the
+		// cluster: the upload then runs in an asset stager pod, as it does
+		// whenever the rustfs node is not a local container.
+		if _, err := exec.LookPath("docker"); err != nil && !e.Cfg.Images.IsPrebuilt() {
 			return "", fmt.Errorf("'docker' is required to run the S3 client but was not found in PATH: %w", err)
 		}
 	} else {
